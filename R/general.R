@@ -929,23 +929,23 @@ remove_global_vars <- function(){
   func_end()
 }
 set_global_variables <- function(debug, verbose, printLog){
-  global_ZygosityPredictor_variable_call_depth <<- 0
-  global_ZygosityPredictor_variable_log_depth <<- 0
-  global_ZygosityPredictor_variable_timelist  <<- list()
+  ZP_env$global_ZygosityPredictor_variable_call_depth <- 0
+  ZP_env$global_ZygosityPredictor_variable_log_depth <- 0
+  ZP_env$global_ZygosityPredictor_variable_timelist  <- list()
   if(debug==TRUE){
-    global_ZygosityPredictor_variable_debug <<- TRUE
+    ZP_env$global_ZygosityPredictor_variable_debug <- TRUE
   } else {
-    global_ZygosityPredictor_variable_debug <<- FALSE
+    ZP_env$global_ZygosityPredictor_variable_debug <- FALSE
   }
   if(verbose==TRUE){
-    global_ZygosityPredictor_variable_verbose <<- TRUE
+    ZP_env$global_ZygosityPredictor_variable_verbose <- TRUE
   } else {
-    global_ZygosityPredictor_variable_verbose <<- FALSE
+    ZP_env$global_ZygosityPredictor_variable_verbose <- FALSE
   }
   if(printLog==TRUE){
-    global_ZygosityPredictor_variable_printLog <<- TRUE
+    ZP_env$global_ZygosityPredictor_variable_printLog <- TRUE
   } else {
-    global_ZygosityPredictor_variable_printLog <<- FALSE
+    ZP_env$global_ZygosityPredictor_variable_printLog <- FALSE
   }
 }
 #' @keywords internal

@@ -678,6 +678,8 @@ predict_zygosity <- function(purity,
                              phasingMode="fast",
                              AllelicImbalancePhasing=FALSE
 ){
+  ZP_env <- new.env()
+  ZP_env$global_ZygosityPredictor_variable_embedded <- TRUE
   status <- info <- wt_cp <- . <- df_homdels <- evaluation_per_variant <- 
     gene <- final_phasing_info <- combined_read_details <-  final_output <-
     uncovered_som <- uncovered_germ <- gr_germ_cov <- gr_som_cov <- 
@@ -686,8 +688,10 @@ predict_zygosity <- function(purity,
     combined_snp_phasing <- evaluation_per_gene <- log_list_per_gene <- 
     detailed_phasing_info <- comb_mat_phased <- comb_mat_info <- NULL
   ## define global debugging variable
+  #print(ZP_env$global_ZygosityPredictor_variable_embedded)
+  print(search())
   set_global_variables(debug, verbose, printLog)
-  global_ZygosityPredictor_variable_embedded <<- TRUE
+  
   ## for parent function this must be here after gobal variable edfinition
   func_start()
   ploidy <- check_ploidy(ploidy)
