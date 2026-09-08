@@ -2,18 +2,13 @@ get_single_index <- function(x,y,nr){
   nr*(x-1)+y
 }
 get_xy_index <- function(inp, nr){
-  lapply(inp, function(i){
-    y <- i%%nr
-    if(y==0){
-      y_ret <- nr
-      x <- (i-y)/nr 
-    } else {
-      y_ret <- y
-      x <- (i-y)/nr+1
-    }
-    return(c(x=x, y=y_ret))  
-  }) %>% Reduce(function(x,y)rbind(x,y),.)
-  
+  inp <- unname(inp)
+  y <- ((inp - 1) %% nr) + 1
+  x <- ((inp - y) / nr) + 1
+  if(length(inp) == 1){
+    return(c(x = x, y = y))
+  }
+  cbind(x = x, y = y)
 }
 get_main_mut_pos <- function(ZP_env){
   lm <- length(ZP_env$global_ZygosityPredictor_variable_main_muts)
@@ -365,10 +360,8 @@ classify_combination <- function(classified_reads, ref_class1, ref_class2,
   ## calculate confidence from basecalls and mapping quality of read
   ## and aggregate them per classification result
   cr_conf <- classified_reads %>%
-    rowwise() %>%
     mutate(pb1=ascii_to_dec(baseq1),
            pb2=ascii_to_dec(baseq2)) %>%
-    ungroup() %>%
     mutate(
       mq1=10^(as.numeric(mapq1)/(-10)),
       mq2=10^(as.numeric(mapq2)/(-10)),
@@ -477,7 +470,54 @@ classify_combination <- function(classified_reads, ref_class1, ref_class2,
 #' @importFrom Rsamtools ScanBamParam
 #' @importFrom IRanges subsetByOverlaps
 #' @importFrom dplyr tibble
-prepare_raw_bam_file <- function(bamDna, chr1, chr2, pos1, pos2, ZP_env){
+## Load all read pairs covering the variants of a gene in one single BAM
+## scan. perform_direct_phasing uses this to avoid one indexed BAM lookup
+## per mutation combination, which dominates the runtime for genes with many
+## variants. Returns a list with elements 'dna' and 'rna', each holding the
+## read pairs (GAlignmentPairs) overlapping the whole gene window, or NULL
+## if there are no such reads.
+load_gene_read_pairs <- function(df_gene, bamDna, bamRna, ZP_env){
+  func_start(ZP_env)
+  chrs <- unique(as.character(df_gene$chr))
+  if(length(chrs)!=1){
+    ## variants on different chromosomes can not be phased directly anyway
+    func_end(ZP_env)
+    return(list(dna=NULL, rna=NULL))
+  }
+  positions <- as.numeric(df_gene$pos)
+  ## fetch only read pairs overlapping one of the variant positions, i.e. the
+  ## same reads the former per-combination indexed lookups would have returned
+  variant_pos_gr <- GRanges(seqnames=chrs[1],
+                            ranges=IRanges(start=positions, width=1))
+  load_window <- function(bam){
+    pairs <- GenomicAlignments::readGAlignmentPairs(
+      bam,
+      param=Rsamtools::ScanBamParam(
+        which=variant_pos_gr,
+        what=c("qname","seq", "cigar", "mapq", "qual")
+      ))
+    if(length(pairs)==0){
+      return(NULL)
+    }
+    ## a read pair overlapping several of the queried positions is returned
+    ## once per position by readGAlignmentPairs; keep each pair only once as
+    ## the per-position lookups would have done
+    qnames <- GenomicRanges::GRanges(GenomicAlignments::first(pairs))$qname
+    pairs <- pairs[!duplicated(qnames)]
+    if(length(pairs)==0){
+      return(NULL)
+    }
+    return(pairs)
+  }
+  dna_reads <- load_window(bamDna)
+  rna_reads <- NULL
+  if(!is.null(bamRna)){
+    rna_reads <- load_window(bamRna)
+  }
+  func_end(ZP_env)
+  return(list(dna=dna_reads, rna=rna_reads))
+}
+prepare_raw_bam_file <- function(bamDna, chr1, chr2, pos1, pos2, ZP_env, preloaded=NULL){
   func_start(ZP_env)
   qname.first <- . <- NULL
   ## importFrom dplyr tibble filter
@@ -498,12 +538,18 @@ prepare_raw_bam_file <- function(bamDna, chr1, chr2, pos1, pos2, ZP_env){
   ref_gr2 <- GRanges(seqnames = ref_chr2, 
                      ranges = ref_pos2)
   ## now load all reads/read-pairs that cover the position of the first variant
-  all_covering_read_pairs <-GenomicAlignments:: readGAlignmentPairs(
-    bamDna,
-    param=Rsamtools::ScanBamParam(
-      which=ref_gr1,
-      what=c("qname","seq", "cigar", "mapq", "qual")
-    )) 
+  all_covering_read_pairs <- if(is.null(preloaded)){
+    GenomicAlignments::readGAlignmentPairs(
+      bamDna,
+      param=Rsamtools::ScanBamParam(
+        which=ref_gr1,
+        what=c("qname","seq", "cigar", "mapq", "qual")
+      ))
+  } else {
+    ## preloaded: read pairs spanning the whole gene window (loaded once),
+    ## subset them in memory for the position of the first variant
+    subsetByOverlaps(preloaded, ref_gr1)
+  }
   if(length(all_covering_read_pairs)==0){
     filtered_reads <- tibble()
     #print(3)
@@ -536,13 +582,16 @@ check_for_overlapping_reads <- function(bamDna, bamRna,
                                         ref_chr1, 
                                         ref_chr2, 
                                         ref_pos1, 
-                                        ref_pos2, ZP_env){
+                                        ref_pos2, ZP_env, preloaded=NULL){
   func_start(ZP_env)
+  dna_pre <- if(is.list(preloaded)) preloaded$dna else NULL
+  rna_pre <- if(is.list(preloaded)) preloaded$rna else NULL
   dna_bam <- prepare_raw_bam_file(bamDna, 
                                   ref_chr1, 
                                   ref_chr2, 
                                   ref_pos1, 
-                                  ref_pos2, ZP_env) 
+                                  ref_pos2, ZP_env,
+                                  preloaded=dna_pre) 
   if(length(dna_bam)!=0){
     dna_bam$origin <- "DNA"
   }
@@ -551,7 +600,8 @@ check_for_overlapping_reads <- function(bamDna, bamRna,
                                     ref_chr1, 
                                     ref_chr2, 
                                     ref_pos1, 
-                                    ref_pos2, ZP_env)
+                                    ref_pos2, ZP_env,
+                                    preloaded=rna_pre)
     if(length(rna_bam)==0){
       rna_bam <- NULL
     } else {
@@ -575,18 +625,19 @@ classify_reads <- function(ref_pos1,
                            ref_ref1,
                            ref_ref2,
                            ref_class1,
-                           ref_class2, bamDna, bamRna, ZP_env){
+                           ref_class2, bamDna, bamRna, ZP_env, preloaded=NULL){
   vm(as.character(sys.call()[1]),  1, ZP_env=ZP_env)
   bam <- check_for_overlapping_reads(bamDna,
                                      bamRna,
                                      ref_chr1,
                                      ref_chr2,
                                      ref_pos1,
-                                     ref_pos2, ZP_env)
+                                     ref_pos2, ZP_env, preloaded=preloaded)
   if(!length(bam)==0){  
+    bam_split <- split(bam, bam$qname)
     classified_reads <- lapply(unique(bam$qname),
                                core_tool,
-                               bam, 
+                               bam_split, 
                                ref_pos1,
                                ref_pos2,
                                ref_alt1,
@@ -606,7 +657,8 @@ classify_reads <- function(ref_pos1,
 #' @importFrom tibble tibble
 #' @importFrom dplyr mutate
 phase_combination <- function(mat_gene_relcomb, comb, bamDna, bamRna,  
-                              geneDir, phasing_type, showReadDetail, ZP_env){
+                              geneDir, phasing_type, showReadDetail, ZP_env,
+                              preloaded=NULL){
   func_start(ZP_env)
   append_loglist("Phasing:", comb, ZP_env=ZP_env)
   ## predefine empty output
@@ -643,7 +695,8 @@ phase_combination <- function(mat_gene_relcomb, comb, bamDna, bamRna,
                                           ref_class2, 
                                           bamDna, 
                                           bamRna,
-                                          ZP_env=ZP_env)
+                                          ZP_env=ZP_env,
+                                          preloaded=preloaded)
   append_loglist(nrow(main_classified_reads), 
                  "reads / read-pairs covering both positions", ZP_env=ZP_env)
   if(nrow(main_classified_reads)!=0){
@@ -769,6 +822,9 @@ perform_direct_phasing <- function(df_gene, bamDna, bamRna,
   rownames(mat_gene) <- mat_gene[,"mut_id"]
   phasing_type <- "direct"
   read_level_phasing_info <- tibble()
+  ## load all read pairs covering the gene once instead of one indexed BAM
+  ## lookup per mutation combination
+  preloaded_reads <- load_gene_read_pairs(df_gene, bamDna, bamRna, ZP_env)
   unphased <- which(is.na(ZP_env$global_ZygosityPredictor_variable_mat_phased))
   i <- 1
   while(i <= length(unphased)){
@@ -778,7 +834,8 @@ perform_direct_phasing <- function(df_gene, bamDna, bamRna,
     mat_gene_relcomb <- mat_gene[relcombxy,]
     
     classified_main_comb <- phase_combination(mat_gene_relcomb, comb, bamDna, bamRna, 
-                                               geneDir, phasing_type, showReadDetail, ZP_env)
+                                               geneDir, phasing_type, showReadDetail, ZP_env,
+                                               preloaded=preloaded_reads)
     read_level_phasing_info <- bind_rows(read_level_phasing_info,
                               classified_main_comb)
     i <- i+1
@@ -832,6 +889,9 @@ perform_indirect_phasing <- function(df_gene, vcf, bamDna, bamRna, haploBlocks,
       )
       to_phase <- prioritize_combination(ZP_env)
       i <- 1
+      ## load all read pairs covering the main and snp positions once instead of
+      ## one indexed BAM lookup per SNP combination
+      preloaded_reads <- load_gene_read_pairs(df, bamDna, bamRna, ZP_env)
       while(!is.null(to_phase)&length(unknown_main(ZP_env))>0){
         append_loglist("Phasing combination:", paste(paste0(to_phase), collapse="-"), ZP_env=ZP_env)
         
@@ -841,7 +901,8 @@ perform_indirect_phasing <- function(df_gene, vcf, bamDna, bamRna, haploBlocks,
                                  nrow(ZP_env$global_ZygosityPredictor_variable_mat_phased))
         classified_main_comb <- phase_combination(mat_gene_relcomb, comb,
                                                   bamDna, bamRna,  
-                                                  geneDir, comb, showReadDetail, ZP_env)
+                                                  geneDir, comb, showReadDetail, ZP_env,
+                                                  preloaded=preloaded_reads)
         append_matrices(classified_main_comb, ZP_env)
         read_level_phasing_info <- bind_rows(read_level_phasing_info,
                                   classified_main_comb)
@@ -881,8 +942,9 @@ load_covering_reads <- function(ref_gr, rel_mut, bamDna, ZP_env){
   )
   if(length(all_covering_reads_rem_dup)>0){
     all_covering_reads_rem_dup$origin <- "DNA"
+    bam_split <- split(all_covering_reads_rem_dup, all_covering_reads_rem_dup$qname)
     all_reads <- lapply(all_covering_reads_rem_dup$qname, function(QNAME){
-      parsed_read <- parse_cigar(all_covering_reads_rem_dup, QNAME, paired=FALSE)
+      parsed_read <- parse_cigar(bam_split[[QNAME]], QNAME, paired=FALSE)
       base_info1 <- extract_base_at_refpos(parsed_read, 
                                            rel_mut$pos, 
                                            rel_mut$class, 
@@ -951,7 +1013,6 @@ calc_genotype_likelihood_per_mut <- function(variants_in_segment,
       if(rel_mut$class=="snv"){
         gtl_eps_v_raw <- all_reads %>%
           .[which(.$base==rel_mut$alt),] %>%
-          rowwise() %>%
           mutate(processed_bq=ascii_to_dec(qual),
             aggregated_qual=1-(1-processed_bq)*(1-processed_mapq)) %>%
           pull(aggregated_qual) 
@@ -959,7 +1020,6 @@ calc_genotype_likelihood_per_mut <- function(variants_in_segment,
         ## it must be adjusted to only the somatic ones
         gtl_eps_l_raw <- all_reads %>%
           .[which(.$base==rel_mut$ref),] %>%
-          rowwise() %>%
           mutate(processed_bq=ascii_to_dec(qual),
                  aggregated_qual=1-(1-processed_bq)*(1-processed_mapq)) %>%
           pull(aggregated_qual)              
@@ -1744,7 +1804,7 @@ evaluate_base <- function(base_info, ref_alt, ref_ref){
 #' @keywords internal
 #' description follows
 #' @importFrom dplyr case_when 
-core_tool <- function(qname, bam,
+core_tool <- function(qname, bam_split,
                       ref_pos1, ref_pos2,
                       ref_alt1, ref_alt2,
                       ref_ref1, ref_ref2,
@@ -1752,7 +1812,7 @@ core_tool <- function(qname, bam,
   #vm("core_tool",  1)
   . <- NULL
   ## parse read according to cigar string
-  parsed_read <- parse_cigar(bam, qname, paired=TRUE)
+  parsed_read <- parse_cigar(bam_split[[qname]], qname, paired=TRUE)
   ## extract base at reference position
   base_info1 <- extract_base_at_refpos(parsed_read, ref_pos1, ref_class1, 
                                        ref_alt1, ref_ref1)

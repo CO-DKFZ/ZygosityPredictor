@@ -330,16 +330,15 @@ prepare_germline_variants <- function(germSmallVars, somCna, purity, sex, ZP_env
 }
 
 ascii_to_dec <- function(ascii_encoded){
-  if(is.na(ascii_encoded)){
-    return(NA)
-  } else {
-    exp <- (as.integer(charToRaw(ascii_encoded))-33)/(-10)
-    if(length(exp)>1){
-      exp <- mean(exp)
-    }
-    # Convert the QUAL string to raw hexadecimal
-    return(10^exp)    
+  na_idx <- is.na(ascii_encoded)
+  out <- rep(NA_real_, length(ascii_encoded))
+  if(any(!na_idx)){
+    vals <- sapply(ascii_encoded[!na_idx], function(s){
+      10^mean((as.integer(charToRaw(s))-33)/(-10))
+    }, USE.NAMES = FALSE)
+    out[!na_idx] <- vals
   }
+  out
 }
 
 #' @importFrom knitr kable

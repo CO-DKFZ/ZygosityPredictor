@@ -54,6 +54,21 @@ test_that("get_xy_index returns correct row-major coordinates", {
   expect_equal(unname(xy[, "y"]), c(1,2,3,1,2,3,1,2,3))
 })
 
+test_that("get_xy_index ignores element names of its input (e.g. from prior derive names)", {
+  nr <- 8
+  inp <- c(17, 25, 33)
+  names(inp) <- rep("x", 3)
+  xy <- ZygosityPredictor:::get_xy_index(inp, nr)
+  ## names attached by pipeline functions such as prioritize_combination must
+  ## not leak into the result, otherwise [["x"]]/[["y"]] subsetting turns NA
+  expect_true(all(colnames(xy) %in% c("x", "y")))
+  ## scalar call must return exactly one x and one y
+  res <- ZygosityPredictor:::get_xy_index(unname(inp[1]), nr)
+  expect_named(res, c("x", "y"))
+  expect_equal(unname(res["x"]), 3)
+  expect_equal(unname(res["y"]), 1)
+})
+
 test_that("make_dist_matrix computes pair distances with distCutOff applied", {
   v <- c(100, 200, 7000, 7500)
   vars <- paste0("m", 1:4)
