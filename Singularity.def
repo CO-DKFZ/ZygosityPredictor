@@ -26,6 +26,10 @@ From: bioconductor/bioconductor_docker:devel
 
     Rscript -e 'if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager", repos = "https://cloud.r-project.org")'
     Rscript -e 'BiocManager::install(version = "devel", ask = FALSE, update = TRUE)'
+    ## the bare devel base image does not ship the dependencies, install the
+    ## Imports (plus the runtime-required cigarillo) before installing the
+    ## local package source
+    Rscript -e 'options(Ncpus=8); BiocManager::install(c("GenomicAlignments","GenomicRanges","Rsamtools","IRanges","VariantAnnotation","DelayedArray","dplyr","stringr","purrr","tibble","igraph","readr","knitr","magrittr","rlang","cigarillo","rmarkdown","testthat","BiocStyle"), ask = FALSE, update = FALSE)'
     R CMD INSTALL --library=/usr/local/lib/R/site-library /opt/ZygosityPredictor
     Rscript -e 'library(ZygosityPredictor); packageVersion("ZygosityPredictor")'
 
