@@ -522,83 +522,12 @@ load_gene_read_pairs <- function(df_gene, bamDna, bamRna, ZP_env){
   if(!is.null(bamRna)){
     rna_reads <- load_window(bamRna, "RNA")
   }
-  parsed_reads <- build_parsed_read_cache(dna_reads, rna_reads)
-  evidence <- build_read_variant_evidence_cache(df_gene, parsed_reads)
+  parsed_reads <- new.env(parent=emptyenv())
   func_end(ZP_env)
-  return(list(dna=dna_reads, rna=rna_reads, parsed=parsed_reads,
-              evidence=evidence))
+  return(list(dna=dna_reads, rna=rna_reads, parsed=parsed_reads))
 }
 make_read_cache_key <- function(origin, qname){
   paste(origin, qname, sep="::")
-}
-build_parsed_read_cache <- function(dna_reads=NULL, rna_reads=NULL){
-  build_one_origin <- function(pairs, origin){
-    if(is.null(pairs)||length(pairs)==0){
-      return(list())
-    }
-    all_reads <- c(
-      GenomicAlignments::first(pairs) %>% GRanges(),
-      GenomicAlignments::last(pairs) %>% GRanges()
-    )
-    all_reads$origin <- origin
-    bam_split <- split(all_reads, all_reads$qname)
-    qnames <- unique(all_reads$qname)
-    parsed <- lapply(qnames, function(QNAME){
-      parse_cigar(bam_split[[QNAME]], QNAME, paired=TRUE)
-    })
-    names(parsed) <- make_read_cache_key(origin, qnames)
-    parsed
-  }
-  c(build_one_origin(dna_reads, "DNA"),
-    build_one_origin(rna_reads, "RNA"))
-}
-parsed_read_covers_pos <- function(parsed_read, ref_pos){
-  any(ref_pos >= parsed_read$map_start & ref_pos <= parsed_read$map_end)
-}
-build_read_variant_evidence_cache <- function(df_gene, parsed_reads){
-  if(is.null(parsed_reads)||length(parsed_reads)==0||nrow(df_gene)==0){
-    return(tibble())
-  }
-  variants <- df_gene %>%
-    as_tibble() %>%
-    mutate(pos=as.numeric(pos),
-           chr=as.character(chr),
-           alt=as.character(alt),
-           ref=as.character(ref),
-           class=as.character(class),
-           mut_id=as.character(mut_id))
-  evidence <- lapply(names(parsed_reads), function(KEY){
-    parsed_read <- parsed_reads[[KEY]]
-    key_parts <- str_split(KEY, "::", n=2)[[1]]
-    origin <- key_parts[1]
-    qname <- key_parts[2]
-    per_variant <- lapply(seq_len(nrow(variants)), function(i){
-      variant <- variants[i,]
-      if(!parsed_read_covers_pos(parsed_read, variant$pos)){
-        return(NULL)
-      }
-      base_info <- extract_base_at_refpos(parsed_read,
-                                          variant$pos,
-                                          variant$class,
-                                          variant$alt,
-                                          variant$ref)
-      detected <- if(is.na(base_info$base)){
-        NA
-      } else {
-        evaluate_base(base_info, variant$alt, variant$ref)
-      }
-      tibble(key=KEY,
-             qname=qname,
-             origin=origin,
-             mut_id=variant$mut_id,
-             base=base_info$base,
-             qual=base_info$qual,
-             mapq=base_info$mapq,
-             detected=detected)
-    })
-    bind_rows(per_variant)
-  })
-  bind_rows(evidence)
 }
 prepare_raw_bam_file <- function(bamDna, chr1, chr2, pos1, pos2, ZP_env, preloaded=NULL, origin=NULL){
   func_start(ZP_env)
@@ -711,36 +640,8 @@ classify_reads <- function(ref_pos1,
                            ref_ref1,
                            ref_ref2,
                            ref_class1,
-                           ref_class2, bamDna, bamRna, ZP_env, preloaded=NULL,
-                           mut_id1=NULL, mut_id2=NULL){
+                           ref_class2, bamDna, bamRna, ZP_env, preloaded=NULL){
   vm(as.character(sys.call()[1]),  1, ZP_env=ZP_env)
-  if(is.list(preloaded)&&!is.null(preloaded$evidence)&&
-     nrow(preloaded$evidence)>0&&!is.null(mut_id1)&&!is.null(mut_id2)){
-    ev1 <- preloaded$evidence %>%
-      filter(mut_id==mut_id1) %>%
-      select(key, qname, origin, detected1=detected, baseq1=qual, mapq1=mapq)
-    ev2 <- preloaded$evidence %>%
-      filter(mut_id==mut_id2) %>%
-      select(key, detected2=detected, baseq2=qual, mapq2=mapq)
-    evidence_pair <- left_join(ev1, ev2, by="key")
-    evidence_pair <- evidence_pair[which(!is.na(evidence_pair$detected2)),]
-    if(nrow(evidence_pair)>0){
-      classified_reads <- evidence_pair %>%
-        rowwise() %>%
-        mutate(result=case_when(
-          is.na(detected1)|is.na(detected2) ~ "skipped",
-          sum(detected1, detected2)==2 ~ "both",
-          sum(detected1, detected2)==0 ~ "none",
-          detected1==1 ~ "mut1",
-          detected2==1 ~ "mut2",
-          TRUE ~ "dev_var"
-        )) %>%
-        ungroup() %>%
-        select(qname, result, origin, baseq1, mapq1, baseq2, mapq2)
-      func_end(ZP_env)
-      return(classified_reads)
-    }
-  }
   bam <- check_for_overlapping_reads(bamDna,
                                      bamRna,
                                      ref_chr1,
@@ -798,8 +699,6 @@ phase_combination <- function(mat_gene_relcomb, comb, bamDna, bamRna,
   
   ref_class1 <- as.character(mat_gene_relcomb[,"class"][[mut1]])
   ref_class2 <- as.character(mat_gene_relcomb[,"class"][[mut2]])
-  mut_id1 <- as.character(mat_gene_relcomb[,"mut_id"][[mut1]])
-  mut_id2 <- as.character(mat_gene_relcomb[,"mut_id"][[mut2]])
   
   main_classified_reads <- classify_reads(ref_pos1,
                                           ref_pos2,
@@ -814,9 +713,7 @@ phase_combination <- function(mat_gene_relcomb, comb, bamDna, bamRna,
                                           bamDna, 
                                           bamRna,
                                           ZP_env=ZP_env,
-                                          preloaded=preloaded,
-                                          mut_id1=mut_id1,
-                                          mut_id2=mut_id2)
+                                          preloaded=preloaded)
   append_loglist(nrow(main_classified_reads), 
                  "reads / read-pairs covering both positions", ZP_env=ZP_env)
   if(nrow(main_classified_reads)!=0){
@@ -1937,10 +1834,15 @@ core_tool <- function(qname, bam_split,
   ## parse read according to cigar string
   origin <- unique(bam_split[[qname]]$origin)
   cache_key <- make_read_cache_key(origin[1], qname)
-  parsed_read <- if(!is.null(parsed_cache)&&cache_key %in% names(parsed_cache)){
-    parsed_cache[[cache_key]]
+  parsed_read <- if(!is.null(parsed_cache)&&
+                    exists(cache_key, envir=parsed_cache, inherits=FALSE)){
+    get(cache_key, envir=parsed_cache, inherits=FALSE)
   } else {
-    parse_cigar(bam_split[[qname]], qname, paired=TRUE)
+    parsed <- parse_cigar(bam_split[[qname]], qname, paired=TRUE)
+    if(!is.null(parsed_cache)){
+      assign(cache_key, parsed, envir=parsed_cache)
+    }
+    parsed
   }
   ## extract base at reference position
   base_info1 <- extract_base_at_refpos(parsed_read, ref_pos1, ref_class1, 
