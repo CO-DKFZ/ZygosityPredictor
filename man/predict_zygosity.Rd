@@ -30,7 +30,8 @@ predict_zygosity(
   logDir = NULL,
   snpQualityCutOff = 1,
   phasingMode = "fast",
-  AllelicImbalancePhasing = FALSE
+  AllelicImbalancePhasing = FALSE,
+  BPPARAM = BiocParallel::SerialParam()
 )
 }
 \arguments{
@@ -145,6 +146,10 @@ confidence phasing result could be achieved, following phasing approaches
 will be carried out}
 
 \item{AllelicImbalancePhasing}{logical, default=FALSE. Enables alleleic imbalance phasing if TRUE}
+
+\item{BPPARAM}{BiocParallelParam object, default=BiocParallel::SerialParam().
+Controls per-gene parallel execution. Use for example
+BiocParallel::MulticoreParam(workers=4) on Unix-like systems.}
 }
 \value{
 A list of dataframes. Those are the evaluation per variant, 

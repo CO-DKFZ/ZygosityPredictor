@@ -11,3 +11,5 @@ Version 1.13.0
   cigarRangesAlongQuerySpace() and cigarRangesAlongReferenceSpace() are
   defunct and replaced by the cigarillo package functions
   cigars_as_ranges_along_query() and cigars_as_ranges_along_ref()
+Version 1.13.2
++ Added optional per-gene parallel execution via BiocParallel BPPARAM

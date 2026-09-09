@@ -1,0 +1,59 @@
+Bootstrap: docker
+From: bioconductor/bioconductor_docker:devel
+
+%labels
+    Author Marco Rheinnecker
+    Description Bioconductor devel container with ZygosityPredictor installed from local source
+    Package ZygosityPredictor
+    PackageVersion 1.13.2
+
+%files
+    DESCRIPTION /opt/ZygosityPredictor/DESCRIPTION
+    NAMESPACE /opt/ZygosityPredictor/NAMESPACE
+    NEWS /opt/ZygosityPredictor/NEWS
+    R /opt/ZygosityPredictor/R
+    inst /opt/ZygosityPredictor/inst
+    man /opt/ZygosityPredictor/man
+    data /opt/ZygosityPredictor/data
+    vignettes /opt/ZygosityPredictor/vignettes
+
+%environment
+    export LC_ALL=C
+    export LANG=C
+    export R_REMOTES_NO_ERRORS_FROM_WARNINGS=true
+
+%post
+    set -e
+
+    Rscript -e 'if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager", repos = "https://cloud.r-project.org")'
+    Rscript -e 'BiocManager::install(version = "devel", ask = FALSE, update = TRUE)'
+    ## the bare devel base image does not ship the dependencies, install the
+    ## Imports (plus the runtime-required cigarillo) before installing the
+    ## local package source
+    Rscript -e 'options(Ncpus=8); BiocManager::install(c("GenomicAlignments","GenomicRanges","Rsamtools","IRanges","VariantAnnotation","DelayedArray","dplyr","stringr","purrr","tibble","igraph","readr","knitr","magrittr","rlang","BiocParallel","cigarillo","rmarkdown","testthat","BiocStyle"), ask = FALSE, update = FALSE)'
+    R CMD INSTALL --library=/usr/local/lib/R/site-library /opt/ZygosityPredictor
+    Rscript -e 'library(ZygosityPredictor); packageVersion("ZygosityPredictor")'
+
+%runscript
+    exec R "$@"
+
+%test
+    Rscript -e 'library(ZygosityPredictor); cat("ZygosityPredictor", as.character(packageVersion("ZygosityPredictor")), "\n")'
+
+%help
+    This container tracks Bioconductor devel and installs ZygosityPredictor
+    from the local source directory (/opt/ZygosityPredictor) during the
+    image build. The source files to package are taken from the build
+    context via %files.
+
+    Build:
+        apptainer build ZygosityPredictor-devel-1.13.2.sif Singularity.def
+
+    Test:
+        apptainer test ZygosityPredictor-devel-1.13.2.sif
+
+    Run R:
+        apptainer run ZygosityPredictor-devel-1.13.2.sif
+
+    Run an Rscript command:
+        apptainer exec ZygosityPredictor-devel-1.13.2.sif Rscript -e 'library(ZygosityPredictor)'

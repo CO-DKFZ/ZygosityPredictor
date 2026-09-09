@@ -608,6 +608,9 @@ predict_per_variant <- function(purity,
 #' @param showReadDetail default = FALSE; if TRUE a table is added to the 
 #' output, containing all used reads/rea-pairs with anntated read classification 
 #' (mut1, mut2, both, none, skipped, dev_var)
+#' @param BPPARAM BiocParallelParam object, default=BiocParallel::SerialParam().
+#' Controls per-gene parallel execution. Use for example
+#' BiocParallel::MulticoreParam(workers=4) on Unix-like systems.
 #' 
 #' 
 #' @return A list of dataframes. Those are the evaluation per variant, 
@@ -668,6 +671,7 @@ predict_per_variant <- function(purity,
 #' @importFrom IRanges subsetByOverlaps
 #' @importFrom purrr compact
 #' @importFrom dplyr bind_rows nth select tibble
+#' @importFrom BiocParallel bplapply SerialParam
 #' @export
 predict_zygosity <- function(purity, 
                              sex,
@@ -694,7 +698,8 @@ predict_zygosity <- function(purity,
                              logDir=NULL,
                              snpQualityCutOff=1, 
                              phasingMode="fast",
-                             AllelicImbalancePhasing=FALSE
+                             AllelicImbalancePhasing=FALSE,
+                             BPPARAM=BiocParallel::SerialParam()
 ){
   status <- info <- wt_cp <- . <- df_homdels <- evaluation_per_variant <- 
     gene <- final_phasing_info <- combined_read_details <-  final_output <-
@@ -744,25 +749,34 @@ predict_zygosity <- function(purity,
         logDir <- check_logDir(logDir)
         haploBlocks <- check_haploblocks(haploBlocks, ZP_env)
         vcf <- check_vcf(vcf)
-        per_gene <- lapply(
-          unique(evaluation_per_variant$gene), 
-          predict_zygosity_genewise, 
-          evaluation_per_variant, 
-          bamDna,
-          bamRna,
-          showReadDetail,
-          printLog,
-          purity,
-          sex,
-          haploBlocks,
-          vcf,
-          distCutOff, 
-          logDir,
-          somCna,
-          snpQualityCutOff, 
-          phasingMode,
-          AllelicImbalancePhasing,
-          ZP_env)
+        genes_to_evaluate <- unique(evaluation_per_variant$gene)
+        per_gene <- BiocParallel::bplapply(
+          genes_to_evaluate,
+          function(GENE){
+            ZP_env_gene <- new.env()
+            set_global_variables(debug, verbose, printLog, ZP_env_gene)
+            predict_zygosity_genewise(
+              GENE,
+              evaluation_per_variant, 
+              bamDna,
+              bamRna,
+              showReadDetail,
+              printLog,
+              purity,
+              sex,
+              haploBlocks,
+              vcf,
+              distCutOff, 
+              logDir,
+              somCna,
+              snpQualityCutOff, 
+              phasingMode,
+              AllelicImbalancePhasing,
+              ZP_env_gene
+            )
+          },
+          BPPARAM=BPPARAM)
+        names(per_gene) <- genes_to_evaluate
         full_eval_per_gene <- lapply(per_gene, nth, n=2) %>% compact()
         log_list_per_gene <- lapply(per_gene, nth, n=3)
         if(length(full_eval_per_gene)!=0){
