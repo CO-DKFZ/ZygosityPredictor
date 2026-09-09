@@ -11,3 +11,9 @@ Version 1.13.0
   cigarRangesAlongQuerySpace() and cigarRangesAlongReferenceSpace() are
   defunct and replaced by the cigarillo package functions
   cigars_as_ranges_along_query() and cigars_as_ranges_along_ref()
+Version 1.13.1
++ Optimized haplotype phasing runtime by caching per-gene parsed reads and
+  read-by-variant evidence, reducing repeated CIGAR parsing across variant
+  combinations
++ Reduced repeated row-binding in direct and indirect phasing loops
++ Made distance matrix construction cutoff-aware for dense variant sets

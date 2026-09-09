@@ -5,6 +5,7 @@ From: bioconductor/bioconductor_docker:devel
     Author Marco Rheinnecker
     Description Bioconductor devel container with ZygosityPredictor installed from local source
     Package ZygosityPredictor
+    PackageVersion 1.13.1
 
 %files
     DESCRIPTION /opt/ZygosityPredictor/DESCRIPTION
@@ -46,13 +47,13 @@ From: bioconductor/bioconductor_docker:devel
     context via %files.
 
     Build:
-        apptainer build ZygosityPredictor-devel.sif Singularity.def
+        apptainer build ZygosityPredictor-devel-1.13.1.sif Singularity.def
 
     Test:
-        apptainer test ZygosityPredictor-devel.sif
+        apptainer test ZygosityPredictor-devel-1.13.1.sif
 
     Run R:
-        apptainer run ZygosityPredictor-devel.sif
+        apptainer run ZygosityPredictor-devel-1.13.1.sif
 
     Run an Rscript command:
-        apptainer exec ZygosityPredictor-devel.sif Rscript -e 'library(ZygosityPredictor)'
+        apptainer exec ZygosityPredictor-devel-1.13.1.sif Rscript -e 'library(ZygosityPredictor)'
